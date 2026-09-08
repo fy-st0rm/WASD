@@ -13,6 +13,7 @@ pub struct DisplayConfig {
   pub height: u16,
   pub direction: Direction,
   pub rotation: i32,
+  pub workspace: u32,
 }
 
 #[derive(Debug, Deserialize)]

@@ -78,6 +78,9 @@
             display: none;
         }
     </style>
+
+    <script src="https://unpkg.com/nosleep.js@0.12.0/dist/NoSleep.min.js"></script>
+
 </head>
 
 <body>
@@ -93,32 +96,13 @@
 <img id="screen">
 
 <script>
+    const noSleep = new NoSleep();
+
     const ROTATION = __ROTATION__;
 
     const image = document.getElementById("screen");
     const stats = document.getElementById("stats");
     const fullscreenButton = document.getElementById("fullscreen");
-    let wakeLock = null;
-
-    async function requestWakeLock() {
-        try {
-            if (!("wakeLock" in navigator)) {
-                console.log("Wake Lock API not supported");
-                return;
-            }
-
-            wakeLock = await navigator.wakeLock.request("screen");
-
-            console.log("Wake lock enabled");
-
-            wakeLock.addEventListener("release", () => {
-                console.log("Wake lock released");
-            });
-
-        } catch (err) {
-            console.error("Wake lock failed:", err.name, err.message);
-        }
-    }
 
     /*
      * Rotation
@@ -136,19 +120,16 @@
      */
     fullscreenButton.onclick = async () => {
         try {
+            noSleep.enable();
             await document.documentElement.requestFullscreen();
-            await requestWakeLock();
         } catch (error) {
             console.error("Fullscreen failed:", error);
         }
     };
 
-    document.addEventListener("visibilitychange", async () => {
-        if (
-            document.visibilityState === "visible" &&
-            document.fullscreenElement
-        ) {
-            await requestWakeLock();
+    document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") {
+            noSleep.enable();
         }
     });
 

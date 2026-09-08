@@ -5,7 +5,7 @@ pub fn configure(
   width: u16,
   height: u16,
   direction: &Direction,
-) -> Result<(i16, i16), Box<dyn std::error::Error>> {
+) -> Result<(i16, i16, String), Box<dyn std::error::Error>> {
   let output = find_virtual_output()?;
 
   let mode = format!("{}x{}", width, height);
@@ -46,7 +46,7 @@ pub fn configure(
     width, height, geometry.0, geometry.1
   );
 
-  Ok(geometry)
+  Ok((geometry.0, geometry.1, output))
 }
 
 pub fn cleanup() -> Result<(), Box<dyn std::error::Error>> {
@@ -127,4 +127,25 @@ fn get_geometry(output_name: &str) -> Result<(i16, i16), Box<dyn std::error::Err
   }
 
   Err(format!("Could not find geometry for {}", output_name).into())
+}
+
+pub fn move_workspace(
+    workspace: u32,
+    output: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let command = format!(
+        "workspace {}; move workspace to output {}",
+        workspace,
+        output
+    );
+
+    let status = Command::new("i3-msg")
+        .arg(&command)
+        .status()?;
+
+    if !status.success() {
+        return Err("Failed to move workspace".into());
+    }
+
+    Ok(())
 }
