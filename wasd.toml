@@ -8,7 +8,7 @@ direction = "bottom"
 # 0, 90, 180, 270
 rotation = 90
 
-# Workspace that will be moved to virtual monitor
+# I3 Workspace that will be moved to virtual monitor
 workspace = 10
 
 [server]

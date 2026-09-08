@@ -11,10 +11,16 @@ It captures an X11 virtual display and streams it to the phone through a web bro
 
    ```toml
    [display]
-   width = 1024
+   width = 1366
    height = 768
-   direction = "right"
+   # left, right, top, bottom
+   direction = "bottom"
+
+   # 0, 90, 180, 270
    rotation = 90
+
+   # I3 Workspace that will be moved to virtual monitor
+   workspace = 10
 
    [server]
    port = 8080
