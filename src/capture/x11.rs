@@ -10,6 +10,9 @@ pub struct X11Capture {
   conn: x11rb::rust_connection::RustConnection,
   root: u32,
 
+  x: i16,
+  y: i16,
+
   shmseg: u32,
   shmaddr: *mut c_void,
 
@@ -31,9 +34,7 @@ impl X11Capture {
       conn.setup().roots[screen_num].width_in_pixels,
       conn.setup().roots[screen_num].height_in_pixels
     );
-
     println!("Capture: {}x{} at ({}, {})", width, height, x, y);
-
     println!("Shared memory size: {} bytes", size);
 
     let shmid = unsafe {
@@ -73,6 +74,9 @@ impl X11Capture {
       conn,
       root,
 
+      x,
+      y,
+
       shmseg,
       shmaddr,
 
@@ -88,8 +92,8 @@ impl X11Capture {
       .conn
       .shm_get_image(
         self.root,
-        0,
-        0,
+        self.x,
+        self.y,
         self.width,
         self.height,
         !0,
