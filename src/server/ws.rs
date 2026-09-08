@@ -3,7 +3,6 @@ use axum::{
   response::Response,
 };
 
-use std::time::Instant;
 use turbojpeg::{Image, PixelFormat, Subsamp, compress};
 
 use crate::capture::x11::X11Capture;
@@ -16,7 +15,7 @@ async fn handle_socket(mut socket: WebSocket) {
   let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(1);
 
   std::thread::spawn(move || {
-    let capture = match X11Capture::new(1366, 0, 1024, 768) {
+    let mut capture = match X11Capture::new(1366, 0, 1024, 768) {
       Ok(capture) => capture,
       Err(e) => {
         eprintln!("Capture error: {e}");
@@ -24,10 +23,10 @@ async fn handle_socket(mut socket: WebSocket) {
       }
     };
 
-    let mut frames = 0;
-    let mut last = Instant::now();
-
     loop {
+      let width = capture.width as usize;
+      let height = capture.height as usize;
+
       let pixels = match capture.capture() {
         Ok(pixels) => pixels,
         Err(e) => {
@@ -36,22 +35,12 @@ async fn handle_socket(mut socket: WebSocket) {
         }
       };
 
-      // X11 gives us BGRX.
-      // Convert to RGB for JPEG.
-      let mut rgb = Vec::with_capacity(pixels.len() / 4 * 3);
-
-      for pixel in pixels.chunks_exact(4) {
-        rgb.push(pixel[2]); // R
-        rgb.push(pixel[1]); // G
-        rgb.push(pixel[0]); // B
-      }
-
       let image = Image {
-        pixels: rgb.as_slice(),
-        width: capture.width as usize,
-        pitch: capture.width as usize * 3,
-        height: capture.height as usize,
-        format: PixelFormat::RGB,
+        pixels,
+        width,
+        pitch: width * 4,
+        height,
+        format: PixelFormat::BGRX,
       };
 
       let jpeg = match compress(image, 80, Subsamp::Sub2x2) {
@@ -63,14 +52,6 @@ async fn handle_socket(mut socket: WebSocket) {
       };
 
       let _ = tx.try_send(jpeg.to_vec());
-
-      frames += 1;
-
-      if last.elapsed().as_secs() >= 1 {
-        println!("JPEG FPS: {frames}");
-        frames = 0;
-        last = Instant::now();
-      }
     }
   });
 
