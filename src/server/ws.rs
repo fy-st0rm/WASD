@@ -7,15 +7,25 @@ use turbojpeg::{Image, PixelFormat, Subsamp, compress};
 
 use crate::capture::x11::X11Capture;
 
-pub async fn websocket(ws: WebSocketUpgrade) -> Response {
-  ws.on_upgrade(handle_socket)
+pub async fn websocket(
+  ws: WebSocketUpgrade,
+  display: crate::config::DisplayConfig,
+  x: i16,
+  y: i16,
+) -> Response {
+  ws.on_upgrade(move |socket| handle_socket(socket, display, x, y))
 }
 
-async fn handle_socket(mut socket: WebSocket) {
+async fn handle_socket(
+  mut socket: WebSocket,
+  display: crate::config::DisplayConfig,
+  x: i16,
+  y: i16,
+) {
   let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(1);
 
   std::thread::spawn(move || {
-    let mut capture = match X11Capture::new(1366, 0, 1024, 768) {
+    let mut capture = match X11Capture::new(x, y, display.width, display.height) {
       Ok(capture) => capture,
       Err(e) => {
         eprintln!("Capture error: {e}");

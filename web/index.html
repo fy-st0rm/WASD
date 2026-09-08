@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>MASD</title>
+
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background: black;
+            overflow: hidden;
+        }
+
+        #screen {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+            object-fit: contain;
+        }
+
+        body.rotated #screen {
+            position: absolute;
+            width: 100vh;
+            height: 100vw;
+
+            left: 50%;
+            top: 50%;
+
+            transform:
+                translate(-50%, -50%)
+                rotate(var(--rotation));
+        }
+
+        #stats {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+
+            padding: 6px 10px;
+
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+
+            font-family: monospace;
+            font-size: 14px;
+
+            z-index: 10;
+        }
+
+        #fullscreen {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+
+            padding: 8px 12px;
+
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 4px;
+
+            cursor: pointer;
+
+            z-index: 10;
+        }
+
+        /* Hide UI while fullscreen */
+        :fullscreen #stats,
+        :fullscreen #fullscreen {
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+
+<div id="stats">
+    FPS: 0
+</div>
+
+<button id="fullscreen">
+    Fullscreen
+</button>
+
+<img id="screen">
+
+<script>
+    const ROTATION = __ROTATION__;
+
+    const image = document.getElementById("screen");
+    const stats = document.getElementById("stats");
+    const fullscreenButton = document.getElementById("fullscreen");
+
+    /*
+     * Rotation
+     */
+    if (ROTATION !== 0) {
+        document.body.classList.add("rotated");
+        document.body.style.setProperty(
+            "--rotation",
+            `${ROTATION}deg`
+        );
+    }
+
+    /*
+     * Fullscreen
+     */
+    fullscreenButton.onclick = async () => {
+        try {
+            await document.documentElement.requestFullscreen();
+        } catch (error) {
+            console.error("Fullscreen failed:", error);
+        }
+    };
+
+    /*
+     * Latest-frame-only display
+     */
+    const socket =
+        new WebSocket("ws://" + location.host + "/ws");
+
+    socket.binaryType = "arraybuffer";
+
+    let latestFrame = null;
+    let displaying = false;
+
+    let frames = 0;
+    let lastFpsTime = performance.now();
+
+    socket.onopen = () => {
+        console.log("Connected");
+    };
+
+    socket.onmessage = (event) => {
+        latestFrame = event.data;
+
+        if (!displaying) {
+            displayNext();
+        }
+    };
+
+    function displayNext() {
+        if (latestFrame === null) {
+            displaying = false;
+            return;
+        }
+
+        displaying = true;
+
+        const frame = latestFrame;
+        latestFrame = null;
+
+        const blob =
+            new Blob(
+                [frame],
+                { type: "image/jpeg" }
+            );
+
+        const url =
+            URL.createObjectURL(blob);
+
+        image.onload = () => {
+            URL.revokeObjectURL(url);
+
+            frames++;
+
+            displayNext();
+        };
+
+        image.onerror = () => {
+            URL.revokeObjectURL(url);
+            displaying = false;
+        };
+
+        image.src = url;
+    }
+
+    /*
+     * FPS counter
+     */
+    setInterval(() => {
+        const now = performance.now();
+
+        const elapsed =
+            now - lastFpsTime;
+
+        const fps =
+            frames * 1000 / elapsed;
+
+        stats.textContent =
+            "FPS: " + fps.toFixed(1);
+
+        frames = 0;
+        lastFpsTime = now;
+    }, 1000);
+
+    socket.onclose = () => {
+        console.log("Disconnected");
+    };
+
+    socket.onerror = (error) => {
+        console.error("WebSocket error:", error);
+    };
+</script>
+
+</body>
+</html>
