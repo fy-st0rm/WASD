@@ -49,6 +49,24 @@ pub fn configure(
   Ok(geometry)
 }
 
+pub fn cleanup() -> Result<(), Box<dyn std::error::Error>> {
+  let output = find_virtual_output()?;
+
+  let status = Command::new("xrandr")
+    .arg("--output")
+    .arg(&output)
+    .arg("--off")
+    .status()?;
+
+  if !status.success() {
+    return Err("Failed to disable virtual display".into());
+  }
+
+  println!("Virtual display disabled");
+
+  Ok(())
+}
+
 fn find_virtual_output() -> Result<String, Box<dyn std::error::Error>> {
   let output = Command::new("xrandr").arg("--query").output()?;
 

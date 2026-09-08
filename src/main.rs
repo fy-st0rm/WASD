@@ -9,15 +9,25 @@ use config::Config;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
   let config = Config::load()?;
 
-  println!("Config: {:#?}", config);
-
   let (x, y) = display::configure(
     config.display.width,
     config.display.height,
     &config.display.direction,
   )?;
 
-  server::run(config.server.port, config.display, x, y).await?;
+  let server = server::run(config.server.port, config.display.clone(), x, y);
+
+  tokio::select! {
+      result = server => {
+          result?;
+      }
+
+      _ = tokio::signal::ctrl_c() => {
+          println!("\nShutting down...");
+      }
+  }
+
+  display::cleanup()?;
 
   Ok(())
 }
