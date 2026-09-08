@@ -36,32 +36,36 @@
 
         #stats {
             position: fixed;
-            top: 10px;
-            left: 10px;
+            top: 20px;
+            left: 20px;
 
-            padding: 6px 10px;
+            padding: 10px 16px;
 
             color: white;
             background: rgba(0, 0, 0, 0.7);
 
             font-family: monospace;
-            font-size: 14px;
+            font-size: 22px;
+
+            border-radius: 8px;
 
             z-index: 10;
         }
 
         #fullscreen {
             position: fixed;
-            top: 10px;
-            right: 10px;
+            top: 20px;
+            right: 20px;
 
-            padding: 8px 12px;
+            padding: 14px 20px;
 
             color: white;
             background: rgba(0, 0, 0, 0.7);
 
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            border-radius: 4px;
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            border-radius: 8px;
+
+            font-size: 20px;
 
             cursor: pointer;
 
@@ -94,6 +98,18 @@
     const image = document.getElementById("screen");
     const stats = document.getElementById("stats");
     const fullscreenButton = document.getElementById("fullscreen");
+    let wakeLock = null;
+
+    async function requestWakeLock() {
+        try {
+            if ("wakeLock" in navigator) {
+                wakeLock = await navigator.wakeLock.request("screen");
+                console.log("Wake lock enabled");
+            }
+        } catch (err) {
+            console.error("Wake lock failed:", err);
+        }
+    }
 
     /*
      * Rotation
@@ -112,10 +128,20 @@
     fullscreenButton.onclick = async () => {
         try {
             await document.documentElement.requestFullscreen();
+            await requestWakeLock();
         } catch (error) {
             console.error("Fullscreen failed:", error);
         }
     };
+
+    document.addEventListener("visibilitychange", async () => {
+        if (
+            document.visibilityState === "visible" &&
+            document.fullscreenElement
+        ) {
+            await requestWakeLock();
+        }
+    });
 
     /*
      * Latest-frame-only display
