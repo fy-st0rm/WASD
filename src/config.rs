@@ -32,7 +32,12 @@ pub enum Direction {
 
 impl Config {
   pub fn load() -> Result<Self, Box<dyn std::error::Error>> {
-    let text = fs::read_to_string("wasd.toml")?;
+    let path = dirs::config_dir()
+      .ok_or("Could not find config directory")?
+      .join("wasd")
+      .join("wasd.toml");
+
+    let text = fs::read_to_string(&path)?;
     let config: Config = toml::from_str(&text)?;
 
     if !matches!(config.display.rotation, 0 | 90 | 180 | 270) {

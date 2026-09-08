@@ -129,23 +129,17 @@ fn get_geometry(output_name: &str) -> Result<(i16, i16), Box<dyn std::error::Err
   Err(format!("Could not find geometry for {}", output_name).into())
 }
 
-pub fn move_workspace(
-    workspace: u32,
-    output: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let command = format!(
-        "workspace {}; move workspace to output {}",
-        workspace,
-        output
-    );
+pub fn move_workspace(workspace: u32, output: &str) -> Result<(), Box<dyn std::error::Error>> {
+  let command = format!(
+    "workspace {}; move workspace to output {}",
+    workspace, output
+  );
 
-    let status = Command::new("i3-msg")
-        .arg(&command)
-        .status()?;
+  let status = Command::new("i3-msg").arg(&command).status()?;
 
-    if !status.success() {
-        return Err("Failed to move workspace".into());
-    }
+  if !status.success() {
+    return Err("Failed to move workspace".into());
+  }
 
-    Ok(())
+  Ok(())
 }

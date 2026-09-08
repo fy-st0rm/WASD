@@ -1,10 +1,11 @@
 [package]
-name = "WASD"
+name = "wasd"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 axum = { version = "0.8.9", features = ["ws"] }
+dirs = "7.0.0"
 image = "0.25.10"
 libc = "0.2.189"
 serde = { version = "1.0.229", features = ["derive"] }
