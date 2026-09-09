@@ -1,39 +1,34 @@
-use axum::{
-  extract::ws::{Message, WebSocket, WebSocketUpgrade},
-  response::Response,
-};
-use std::sync::{
-  Arc,
-  atomic::{AtomicBool, Ordering},
-};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
 use std::time::{Duration, Instant};
+
+use axum::extract::ws::{Message, WebSocket};
+use axum::{extract::WebSocketUpgrade, response::Response};
+
+use tokio::sync::broadcast;
 use turbojpeg::{Image, PixelFormat, Subsamp, compress};
 
 use crate::capture::x11::X11Capture;
 
-pub async fn websocket(
-  ws: WebSocketUpgrade,
-  display: crate::config::DisplayConfig,
-  x: i16,
-  y: i16,
-) -> Response {
-  ws.on_upgrade(move |socket| handle_socket(socket, display, x, y))
-}
+pub type FrameSender = broadcast::Sender<Vec<u8>>;
 
-async fn handle_socket(
-  mut socket: WebSocket,
+pub fn start_capture(
   display: crate::config::DisplayConfig,
   x: i16,
   y: i16,
-) {
-  let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(1);
+) -> (FrameSender, Arc<AtomicBool>, thread::JoinHandle<()>) {
+  let (tx, _) = broadcast::channel::<Vec<u8>>(1);
 
   let stop = Arc::new(AtomicBool::new(false));
   let capture_stop = Arc::clone(&stop);
 
-  let capture_thread = std::thread::spawn(move || {
+  let capture_tx = tx.clone();
+
+  let thread = thread::spawn(move || {
     let mut capture = match X11Capture::new(x, y, display.width, display.height) {
       Ok(capture) => capture,
+
       Err(e) => {
         eprintln!("Capture error: {e}");
         return;
@@ -43,7 +38,6 @@ async fn handle_socket(
     let frame_time = Duration::from_secs_f64(1.0 / display.fps as f64);
 
     loop {
-      // Client disconnected?
       if capture_stop.load(Ordering::Relaxed) {
         break;
       }
@@ -55,9 +49,10 @@ async fn handle_socket(
 
       let pixels = match capture.capture() {
         Ok(pixels) => pixels,
+
         Err(e) => {
           eprintln!("Capture error: {e}");
-          return;
+          break;
         }
       };
 
@@ -71,28 +66,48 @@ async fn handle_socket(
 
       let jpeg = match compress(image, 80, Subsamp::Sub2x2) {
         Ok(jpeg) => jpeg,
+
         Err(e) => {
           eprintln!("JPEG error: {e}");
-          return;
+          break;
         }
       };
 
-      let _ = tx.try_send(jpeg.to_vec());
+      let _ = capture_tx.send(jpeg.to_vec());
 
       let elapsed = start.elapsed();
 
       if elapsed < frame_time {
-        std::thread::sleep(frame_time - elapsed);
+        thread::sleep(frame_time - elapsed);
       }
     }
 
     println!("Capture thread stopped");
   });
 
+  (tx, stop, thread)
+}
+
+pub async fn websocket(ws: WebSocketUpgrade, tx: FrameSender) -> Response {
+  ws.on_upgrade(move |socket| handle_socket(socket, tx))
+}
+
+async fn handle_socket(mut socket: WebSocket, tx: FrameSender) {
+  let mut rx = tx.subscribe();
+
   loop {
-    let jpeg = match rx.recv() {
+    let jpeg = match rx.recv().await {
       Ok(jpeg) => jpeg,
-      Err(_) => break,
+
+      Err(broadcast::error::RecvError::Lagged(_)) => {
+        // Client was too slow.
+        // Skip old frames and get the newest one.
+        continue;
+      }
+
+      Err(broadcast::error::RecvError::Closed) => {
+        break;
+      }
     };
 
     if socket.send(Message::Binary(jpeg.into())).await.is_err() {
@@ -100,10 +115,4 @@ async fn handle_socket(
       break;
     }
   }
-
-  // Tell capture thread to stop.
-  stop.store(true, Ordering::Relaxed);
-
-  // Wait for capture thread to finish.
-  let _ = capture_thread.join();
 }

@@ -23,6 +23,8 @@ pub async fn run(
 
   let html = include_str!("../../web/index.html").replace("__ROTATION__", &rotation.to_string());
 
+  let (frame_tx, capture_stop, capture_thread) = ws::start_capture(display.clone(), x, y);
+
   let app = Router::new()
     .route(
       "/",
@@ -34,7 +36,11 @@ pub async fn run(
     )
     .route(
       "/ws",
-      get(move |ws| ws::websocket(ws, display.clone(), x, y)),
+      get({
+        let frame_tx = frame_tx.clone();
+
+        move |ws| ws::websocket(ws, frame_tx.clone())
+      }),
     );
 
   let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
