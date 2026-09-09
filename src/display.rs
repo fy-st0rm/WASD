@@ -82,7 +82,7 @@ fn ensure_mode(
   width: u16,
   height: u16,
 ) -> Result<String, Box<dyn std::error::Error>> {
-  let mode = format!("{}x{}", width, height);
+  let requested = format!("{}x{}", width, height);
 
   let xrandr = Command::new("xrandr")
     .arg("--query")
@@ -90,48 +90,22 @@ fn ensure_mode(
 
   let text = String::from_utf8(xrandr.stdout)?;
 
-  /*
-   * Check whether the requested resolution already exists
-   * on the virtual output.
-   */
-  if output_has_mode(&text, output, &mode) {
+  // Check if the requested resolution already exists
+  // on the virtual output.
+  if let Some(mode) = find_output_mode(
+    &text,
+    output,
+    &requested,
+  ) {
     return Ok(mode);
   }
 
-  /*
-   * The resolution doesn't exist on the virtual output.
-   *
-   * It may already exist globally, so first check whether
-   * the mode exists anywhere in xrandr.
-   */
-  let global_mode_exists = text
-    .lines()
-    .any(|line| {
-      line
-        .split_whitespace()
-        .any(|part| part == mode)
-    });
-
-  if global_mode_exists {
-    println!(
-      "Mode {} exists, adding it to {}",
-      mode,
-      output
-    );
-
-    add_mode(output, &mode)?;
-
-    return Ok(mode);
-  }
-
-  /*
-   * Generate a modeline.
-   */
   println!(
-    "Mode {} not found, generating modeline...",
-    mode
+    "Mode {} not found. Generating modeline...",
+    requested
   );
 
+  // Generate modeline.
   let cvt = Command::new("cvt")
     .arg(width.to_string())
     .arg(height.to_string())
@@ -139,19 +113,11 @@ fn ensure_mode(
     .output()?;
 
   if !cvt.status.success() {
-    return Err(
-      "cvt failed. Is cvt installed?".into()
-    );
+    return Err("cvt failed. Is cvt installed?".into());
   }
 
-  let cvt_output =
-    String::from_utf8(cvt.stdout)?;
+  let cvt_output = String::from_utf8(cvt.stdout)?;
 
-  /*
-   * Find:
-   *
-   * Modeline "1080x1920_60.00" ...
-   */
   let modeline = cvt_output
     .lines()
     .find(|line| {
@@ -159,8 +125,7 @@ fn ensure_mode(
     })
     .ok_or("Could not find Modeline in cvt output")?;
 
-  let mut parts =
-    modeline.split_whitespace();
+  let mut parts = modeline.split_whitespace();
 
   parts.next(); // Modeline
 
@@ -170,88 +135,103 @@ fn ensure_mode(
     .trim_matches('"')
     .to_string();
 
-  let values: Vec<&str> =
-    parts.collect();
+  let values: Vec<&str> = parts.collect();
 
-  /*
-   * Create the mode globally.
-   */
-  let mut command =
-    Command::new("xrandr");
+  // Check again in case the mode already exists globally.
+  let xrandr = Command::new("xrandr")
+    .arg("--query")
+    .output()?;
 
-  command
-    .arg("--newmode")
-    .arg(&generated_name);
+  let text = String::from_utf8(xrandr.stdout)?;
 
-  for value in values {
-    command.arg(value);
-  }
+  let global_exists = text
+    .lines()
+    .any(|line| {
+      line
+        .split_whitespace()
+        .any(|part| part == generated_name)
+    });
 
-  let status = command.status()?;
-
-  if !status.success() {
-    /*
-     * The mode may have been created by another
-     * process between our checks. Continue and try
-     * adding it to the output.
-     */
+  if !global_exists {
     println!(
-      "Warning: mode {} may already exist",
+      "Creating XRandR mode: {}",
       generated_name
     );
+
+    let mut command =
+      Command::new("xrandr");
+
+    command
+      .arg("--newmode")
+      .arg(&generated_name);
+
+    for value in &values {
+      command.arg(value);
+    }
+
+    let status = command.status()?;
+
+    if !status.success() {
+      return Err(
+        format!(
+          "Failed to create mode {}",
+          generated_name
+        )
+        .into(),
+      );
+    }
   }
 
-  /*
-   * Add the generated mode to the virtual output.
-   */
-  add_mode(
+  // Add the mode to the virtual output.
+  //
+  // It may already be attached, so only do this if
+  // it isn't already present.
+  let xrandr = Command::new("xrandr")
+    .arg("--query")
+    .output()?;
+
+  let text = String::from_utf8(xrandr.stdout)?;
+
+  if find_output_mode(
+    &text,
     output,
-    &generated_name,
-  )?;
+    &requested,
+  ).is_none() {
+    let status = Command::new("xrandr")
+      .arg("--addmode")
+      .arg(output)
+      .arg(&generated_name)
+      .status()?;
+
+    if !status.success() {
+      return Err(
+        format!(
+          "Failed to add mode {} to {}",
+          generated_name,
+          output
+        )
+        .into(),
+      );
+    }
+  }
 
   println!(
-    "Created mode: {}",
+    "Using mode: {}",
     generated_name
   );
 
   Ok(generated_name)
 }
 
-fn add_mode(
-  output: &str,
-  mode: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-  let status = Command::new("xrandr")
-    .arg("--addmode")
-    .arg(output)
-    .arg(mode)
-    .status()?;
-
-  if !status.success() {
-    return Err(
-      format!(
-        "Failed to add mode {} to {}",
-        mode,
-        output
-      )
-      .into(),
-    );
-  }
-
-  Ok(())
-}
-
-fn output_has_mode(
+fn find_output_mode(
   xrandr_output: &str,
   output_name: &str,
-  mode: &str,
-) -> bool {
+  requested: &str,
+) -> Option<String> {
   let mut found_output = false;
 
   for line in xrandr_output.lines() {
-    /*
-     * Find the requested output.
-     */
+    // Found our output.
     if line.starts_with(output_name)
       && line.contains(" connected")
     {
@@ -259,9 +239,7 @@ fn output_has_mode(
       continue;
     }
 
-    /*
-     * Stop when another output begins.
-     */
+    // Another output starts.
     if found_output
       && !line.starts_with(' ')
       && !line.starts_with('\t')
@@ -269,20 +247,35 @@ fn output_has_mode(
       break;
     }
 
-    if found_output {
-      if line
-        .split_whitespace()
-        .any(|part| {
-          part == mode
-            || part.starts_with(&format!("{}_", mode))
-        })
+    if !found_output {
+      continue;
+    }
+
+    for part in line.split_whitespace() {
+      /*
+       * Requested:
+       *
+       * 1080x1920
+       *
+       * Actual XRandR mode:
+       *
+       * 1080x1920_60.00
+       *
+       * Accept either.
+       */
+      if part == requested
+        || part.starts_with(
+          &format!("{}_", requested)
+        )
       {
-        return true;
+        return Some(
+          part.to_string()
+        );
       }
     }
   }
 
-  false
+  None
 }
 
 pub fn cleanup() -> Result<(), Box<dyn std::error::Error>> {

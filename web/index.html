@@ -25,10 +25,8 @@
             position: absolute;
             width: 100vh;
             height: 100vw;
-
             left: 50%;
             top: 50%;
-
             transform:
                 translate(-50%, -50%)
                 rotate(var(--rotation));
@@ -38,17 +36,12 @@
             position: fixed;
             top: 20px;
             left: 20px;
-
             padding: 10px 16px;
-
             color: white;
             background: rgba(0, 0, 0, 0.7);
-
             font-family: monospace;
             font-size: 22px;
-
             border-radius: 8px;
-
             z-index: 10;
         }
 
@@ -56,23 +49,16 @@
             position: fixed;
             top: 20px;
             right: 20px;
-
             padding: 14px 20px;
-
             color: white;
             background: rgba(0, 0, 0, 0.7);
-
             border: 1px solid rgba(255, 255, 255, 0.4);
             border-radius: 8px;
-
             font-size: 20px;
-
             cursor: pointer;
-
             z-index: 10;
         }
 
-        /* Hide UI while fullscreen */
         :fullscreen #stats,
         :fullscreen #fullscreen {
             display: none;
@@ -80,14 +66,11 @@
     </style>
 
     <script src="https://unpkg.com/nosleep.js@0.12.0/dist/NoSleep.min.js"></script>
-
 </head>
 
 <body>
 
-<div id="stats">
-    FPS: 0
-</div>
+<div id="stats">FPS: 0</div>
 
 <button id="fullscreen">
     Fullscreen
@@ -102,64 +85,98 @@
 
     const image = document.getElementById("screen");
     const stats = document.getElementById("stats");
-    const fullscreenButton = document.getElementById("fullscreen");
+    const fullscreenButton =
+        document.getElementById("fullscreen");
 
-    /*
-     * Rotation
-     */
+
+    // ------------------------------------------------------------
+    // KIOSK MODE
+    // ------------------------------------------------------------
+
+    const kiosk =
+        new URLSearchParams(location.search).has("kiosk");
+
+
+    // ------------------------------------------------------------
+    // ROTATION
+    // ------------------------------------------------------------
+
     if (ROTATION !== 0) {
         document.body.classList.add("rotated");
+
         document.body.style.setProperty(
             "--rotation",
             `${ROTATION}deg`
         );
     }
 
-    /*
-     * Fullscreen
-     */
+
+    // ------------------------------------------------------------
+    // FULLSCREEN
+    // ------------------------------------------------------------
+
+    function updateFullscreenButton() {
+        if (kiosk) {
+            fullscreenButton.style.display = "none";
+            stats.style.display = "none";
+            return;
+        }
+
+        const fullscreen = document.fullscreenElement;
+
+        fullscreenButton.style.display =
+            fullscreen ? "none" : "block";
+
+        stats.style.display =
+            fullscreen ? "none" : "block";
+    }
+
+    updateFullscreenButton();
+
+    document.addEventListener(
+        "fullscreenchange",
+        updateFullscreenButton
+    );
+
+
     fullscreenButton.onclick = async () => {
         try {
             noSleep.enable();
+
             await document.documentElement.requestFullscreen();
+
         } catch (error) {
-            console.error("Fullscreen failed:", error);
+            console.error(
+                "Fullscreen failed:",
+                error
+            );
         }
     };
 
-    document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "visible") {
-            noSleep.enable();
+
+    // ------------------------------------------------------------
+    // KEEP SCREEN AWAKE
+    // ------------------------------------------------------------
+
+    document.addEventListener(
+        "visibilitychange",
+        () => {
+            if (document.visibilityState === "visible") {
+                noSleep.enable();
+            }
         }
-    });
+    );
 
-    /*
-     * Latest-frame-only display
-     */
-    const socket =
-        new WebSocket("ws://" + location.host + "/ws");
 
-    socket.binaryType = "arraybuffer";
+    // ------------------------------------------------------------
+    // FRAME DISPLAY
+    // ------------------------------------------------------------
 
     let latestFrame = null;
     let displaying = false;
 
-    let frames = 0;
-    let lastFpsTime = performance.now();
-
-    socket.onopen = () => {
-        console.log("Connected");
-    };
-
-    socket.onmessage = (event) => {
-        latestFrame = event.data;
-
-        if (!displaying) {
-            displayNext();
-        }
-    };
-
     function displayNext() {
+
         if (latestFrame === null) {
             displaying = false;
             return;
@@ -170,16 +187,17 @@
         const frame = latestFrame;
         latestFrame = null;
 
-        const blob =
-            new Blob(
-                [frame],
-                { type: "image/jpeg" }
-            );
+        const blob = new Blob(
+            [frame],
+            { type: "image/jpeg" }
+        );
 
         const url =
             URL.createObjectURL(blob);
 
+
         image.onload = () => {
+
             URL.revokeObjectURL(url);
 
             frames++;
@@ -187,18 +205,28 @@
             displayNext();
         };
 
+
         image.onerror = () => {
+
             URL.revokeObjectURL(url);
+
             displaying = false;
         };
+
 
         image.src = url;
     }
 
-    /*
-     * FPS counter
-     */
+
+    // ------------------------------------------------------------
+    // FPS
+    // ------------------------------------------------------------
+
+    let frames = 0;
+    let lastFpsTime = performance.now();
+
     setInterval(() => {
+
         const now = performance.now();
 
         const elapsed =
@@ -212,15 +240,97 @@
 
         frames = 0;
         lastFpsTime = now;
+
     }, 1000);
 
-    socket.onclose = () => {
-        console.log("Disconnected");
-    };
 
-    socket.onerror = (error) => {
-        console.error("WebSocket error:", error);
-    };
+    // ------------------------------------------------------------
+    // WEBSOCKET
+    // ------------------------------------------------------------
+
+    let socket = null;
+    let reconnectTimer = null;
+
+
+    function connect() {
+
+        console.log(
+            "Connecting to WebSocket..."
+        );
+
+
+        socket = new WebSocket(
+            "ws://" + location.host + "/ws"
+        );
+
+        socket.binaryType =
+            "arraybuffer";
+
+
+        socket.onopen = () => {
+
+            console.log(
+                "WebSocket connected"
+            );
+
+            if (reconnectTimer !== null) {
+                clearTimeout(reconnectTimer);
+                reconnectTimer = null;
+            }
+        };
+
+
+        socket.onmessage = (event) => {
+
+            // Always keep only the newest frame.
+            latestFrame = event.data;
+
+            if (!displaying) {
+                displayNext();
+            }
+        };
+
+
+        socket.onclose = () => {
+
+            console.log(
+                "WebSocket disconnected"
+            );
+
+            scheduleReconnect();
+        };
+
+
+        socket.onerror = (error) => {
+
+            console.error(
+                "WebSocket error:",
+                error
+            );
+
+            socket.close();
+        };
+    }
+
+
+    function scheduleReconnect() {
+
+        if (reconnectTimer !== null) {
+            return;
+        }
+
+        reconnectTimer = setTimeout(() => {
+
+            reconnectTimer = null;
+
+            connect();
+
+        }, 2000);
+    }
+
+
+    connect();
+
 </script>
 
 </body>
