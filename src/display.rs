@@ -6,7 +6,8 @@ pub fn configure(
   height: u16,
   direction: &Direction,
 ) -> Result<(i16, i16, String), Box<dyn std::error::Error>> {
-  let output = find_virtual_output()?;
+  let virtual_output = find_virtual_output()?;
+  let primary_output = find_primary_output()?;
 
   let mode = format!("{}x{}", width, height);
 
@@ -14,22 +15,33 @@ pub fn configure(
 
   command
     .arg("--output")
-    .arg(&output)
+    .arg(&virtual_output)
     .arg("--mode")
     .arg(&mode);
 
   match direction {
     Direction::Left => {
-      command.arg("--left-of").arg("eDP-1");
+      command
+        .arg("--left-of")
+        .arg(&primary_output);
     }
+
     Direction::Right => {
-      command.arg("--right-of").arg("eDP-1");
+      command
+        .arg("--right-of")
+        .arg(&primary_output);
     }
+
     Direction::Top => {
-      command.arg("--above").arg("eDP-1");
+      command
+        .arg("--above")
+        .arg(&primary_output);
     }
+
     Direction::Bottom => {
-      command.arg("--below").arg("eDP-1");
+      command
+        .arg("--below")
+        .arg(&primary_output);
     }
   }
 
@@ -39,14 +51,22 @@ pub fn configure(
     return Err("xrandr failed".into());
   }
 
-  let geometry = get_geometry(&output)?;
+  let geometry = get_geometry(&virtual_output)?;
+
+  println!(
+    "Primary display: {}",
+    primary_output
+  );
 
   println!(
     "Virtual display: {}x{} at ({}, {})",
-    width, height, geometry.0, geometry.1
+    width,
+    height,
+    geometry.0,
+    geometry.1
   );
 
-  Ok((geometry.0, geometry.1, output))
+  Ok((geometry.0, geometry.1, virtual_output))
 }
 
 pub fn cleanup() -> Result<(), Box<dyn std::error::Error>> {
@@ -68,21 +88,73 @@ pub fn cleanup() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn find_virtual_output() -> Result<String, Box<dyn std::error::Error>> {
-  let output = Command::new("xrandr").arg("--query").output()?;
+  let output = Command::new("xrandr")
+    .arg("--query")
+    .output()?;
 
   let text = String::from_utf8(output.stdout)?;
 
   for line in text.lines() {
-    if line.contains(" connected") && line.starts_with("Virtual-") {
-      return Ok(line.split_whitespace().next().unwrap().to_string());
+    if line.starts_with("Virtual-") && line.contains(" connected") {
+      let name = line
+        .split_whitespace()
+        .next()
+        .ok_or("Invalid xrandr output")?;
+
+      return Ok(name.to_string());
     }
   }
 
   Err("Could not find virtual output".into())
 }
 
-fn get_geometry(output_name: &str) -> Result<(i16, i16), Box<dyn std::error::Error>> {
-  let output = Command::new("xrandr").arg("--query").output()?;
+fn find_primary_output() -> Result<String, Box<dyn std::error::Error>> {
+  let output = Command::new("xrandr")
+    .arg("--query")
+    .output()?;
+
+  let text = String::from_utf8(output.stdout)?;
+
+  // Prefer the output explicitly marked as primary.
+  for line in text.lines() {
+    if line.contains(" connected primary") {
+      let name = line
+        .split_whitespace()
+        .next()
+        .ok_or("Invalid xrandr output")?;
+
+      // Don't accidentally select a virtual display.
+      if !name.starts_with("Virtual-") {
+        return Ok(name.to_string());
+      }
+    }
+  }
+
+  // Fallback: use the first connected non-virtual output.
+  for line in text.lines() {
+    if !line.contains(" connected") {
+      continue;
+    }
+
+    let name = line
+      .split_whitespace()
+      .next()
+      .ok_or("Invalid xrandr output")?;
+
+    if !name.starts_with("Virtual-") {
+      return Ok(name.to_string());
+    }
+  }
+
+  Err("Could not find physical display".into())
+}
+
+fn get_geometry(
+  output_name: &str,
+) -> Result<(i16, i16), Box<dyn std::error::Error>> {
+  let output = Command::new("xrandr")
+    .arg("--query")
+    .output()?;
 
   let text = String::from_utf8(output.stdout)?;
 
@@ -92,12 +164,13 @@ fn get_geometry(output_name: &str) -> Result<(i16, i16), Box<dyn std::error::Err
     }
 
     for part in line.split_whitespace() {
-      // Find geometry containing the configured position.
-      //
       // Examples:
+      //
       // 1024x768+1366+0
       // 1024x768-1024+0
       // 1024x768+0-768
+      //
+      // Find the first coordinate sign after WIDTHxHEIGHT.
 
       let Some(x_pos) = part.find('x') else {
         continue;
@@ -120,22 +193,37 @@ fn get_geometry(output_name: &str) -> Result<(i16, i16), Box<dyn std::error::Err
       let x_str = &coords[..second_sign];
       let y_str = &coords[second_sign..];
 
-      if let (Ok(x), Ok(y)) = (x_str.parse::<i16>(), y_str.parse::<i16>()) {
+      if let (Ok(x), Ok(y)) = (
+        x_str.parse::<i16>(),
+        y_str.parse::<i16>(),
+      ) {
         return Ok((x, y));
       }
     }
   }
 
-  Err(format!("Could not find geometry for {}", output_name).into())
+  Err(
+    format!(
+      "Could not find geometry for {}",
+      output_name
+    )
+    .into(),
+  )
 }
 
-pub fn move_workspace(workspace: u32, output: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub fn move_workspace(
+  workspace: u32,
+  output: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
   let command = format!(
     "workspace {}; move workspace to output {}",
-    workspace, output
+    workspace,
+    output
   );
 
-  let status = Command::new("i3-msg").arg(&command).status()?;
+  let status = Command::new("i3-msg")
+    .arg(&command)
+    .status()?;
 
   if !status.success() {
     return Err("Failed to move workspace".into());
