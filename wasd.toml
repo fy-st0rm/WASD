@@ -8,8 +8,8 @@ direction = "bottom"
 # 0, 90, 180, 270
 rotation = 90
 
-# I3 Workspace that will be moved to virtual monitor
-workspace = 10
+# I3 Workspaces that will be moved to virtual monitor
+workspaces = [9, 10]
 
 fps = 30
 

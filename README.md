@@ -93,8 +93,8 @@ direction = "bottom"
 # 0, 90, 180, 270
 rotation = 90
 
-# i3 workspace that will be moved to the virtual monitor
-workspace = 10
+# i3 workspaces that will be moved to the virtual monitor
+workspaces = [9, 10]
 
 fps = 30
 
@@ -107,7 +107,7 @@ port = 8080
 - **width / height** — resolution of the virtual display.
 - **direction** — position of the virtual display relative to your primary monitor.
 - **rotation** — rotation applied by the browser on the Android device.
-- **workspace** — i3 workspace that WASD moves to the virtual monitor.
+- **workspaces** — i3 workspaces that WASD moves to the virtual monitor.
 - **fps** — Max fps to capture the screen frame
 
 The resolution must be an existing mode supported by the VKMS virtual output.

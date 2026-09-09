@@ -14,7 +14,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     config.display.height,
     &config.display.direction,
   )?;
-  display::move_workspace(config.display.workspace, &output)?;
+
+  for workspace in &config.display.workspaces {
+    display::move_workspace(*workspace, &output)?;
+  }
 
   let server = server::run(config.server.port, config.display.clone(), x, y);
 

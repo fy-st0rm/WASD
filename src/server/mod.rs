@@ -23,7 +23,7 @@ pub async fn run(
 
   let html = include_str!("../../web/index.html").replace("__ROTATION__", &rotation.to_string());
 
-  let (frame_tx, capture_stop, capture_thread) = ws::start_capture(display.clone(), x, y);
+  let (frame_tx, _capture_stop, _capture_thread) = ws::start_capture(display.clone(), x, y);
 
   let app = Router::new()
     .route(

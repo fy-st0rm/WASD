@@ -13,7 +13,7 @@ pub struct DisplayConfig {
   pub height: u16,
   pub direction: Direction,
   pub rotation: i32,
-  pub workspace: u32,
+  pub workspaces: Vec<u32>,
   pub fps: u32,
 }
 
@@ -48,7 +48,7 @@ width = 1024
 height = 768
 direction = "right"
 rotation = 90
-workspace = 10
+workspaces = [9, 10]
 fps = 30
 
 [server]
