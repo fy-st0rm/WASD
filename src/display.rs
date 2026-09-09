@@ -9,11 +9,7 @@ pub fn configure(
   let virtual_output = find_virtual_output()?;
   let primary_output = find_primary_output()?;
 
-  let mode = ensure_mode(
-    &virtual_output,
-    width,
-    height,
-  )?;
+  let mode = ensure_mode(&virtual_output, width, height)?;
 
   let mut command = Command::new("xrandr");
 
@@ -25,27 +21,19 @@ pub fn configure(
 
   match direction {
     Direction::Left => {
-      command
-        .arg("--left-of")
-        .arg(&primary_output);
+      command.arg("--left-of").arg(&primary_output);
     }
 
     Direction::Right => {
-      command
-        .arg("--right-of")
-        .arg(&primary_output);
+      command.arg("--right-of").arg(&primary_output);
     }
 
     Direction::Top => {
-      command
-        .arg("--above")
-        .arg(&primary_output);
+      command.arg("--above").arg(&primary_output);
     }
 
     Direction::Bottom => {
-      command
-        .arg("--below")
-        .arg(&primary_output);
+      command.arg("--below").arg(&primary_output);
     }
   }
 
@@ -57,24 +45,14 @@ pub fn configure(
 
   let geometry = get_geometry(&virtual_output)?;
 
-  println!(
-    "Primary display: {}",
-    primary_output
-  );
+  println!("Primary display: {}", primary_output);
 
   println!(
     "Virtual display: {}x{} at ({}, {})",
-    width,
-    height,
-    geometry.0,
-    geometry.1
+    width, height, geometry.0, geometry.1
   );
 
-  Ok((
-    geometry.0,
-    geometry.1,
-    virtual_output,
-  ))
+  Ok((geometry.0, geometry.1, virtual_output))
 }
 
 fn ensure_mode(
@@ -84,26 +62,17 @@ fn ensure_mode(
 ) -> Result<String, Box<dyn std::error::Error>> {
   let requested = format!("{}x{}", width, height);
 
-  let xrandr = Command::new("xrandr")
-    .arg("--query")
-    .output()?;
+  let xrandr = Command::new("xrandr").arg("--query").output()?;
 
   let text = String::from_utf8(xrandr.stdout)?;
 
   // Check if the requested resolution already exists
   // on the virtual output.
-  if let Some(mode) = find_output_mode(
-    &text,
-    output,
-    &requested,
-  ) {
+  if let Some(mode) = find_output_mode(&text, output, &requested) {
     return Ok(mode);
   }
 
-  println!(
-    "Mode {} not found. Generating modeline...",
-    requested
-  );
+  println!("Mode {} not found. Generating modeline...", requested);
 
   // Generate modeline.
   let cvt = Command::new("cvt")
@@ -120,9 +89,7 @@ fn ensure_mode(
 
   let modeline = cvt_output
     .lines()
-    .find(|line| {
-      line.trim_start().starts_with("Modeline")
-    })
+    .find(|line| line.trim_start().starts_with("Modeline"))
     .ok_or("Could not find Modeline in cvt output")?;
 
   let mut parts = modeline.split_whitespace();
@@ -138,32 +105,20 @@ fn ensure_mode(
   let values: Vec<&str> = parts.collect();
 
   // Check again in case the mode already exists globally.
-  let xrandr = Command::new("xrandr")
-    .arg("--query")
-    .output()?;
+  let xrandr = Command::new("xrandr").arg("--query").output()?;
 
   let text = String::from_utf8(xrandr.stdout)?;
 
   let global_exists = text
     .lines()
-    .any(|line| {
-      line
-        .split_whitespace()
-        .any(|part| part == generated_name)
-    });
+    .any(|line| line.split_whitespace().any(|part| part == generated_name));
 
   if !global_exists {
-    println!(
-      "Creating XRandR mode: {}",
-      generated_name
-    );
+    println!("Creating XRandR mode: {}", generated_name);
 
-    let mut command =
-      Command::new("xrandr");
+    let mut command = Command::new("xrandr");
 
-    command
-      .arg("--newmode")
-      .arg(&generated_name);
+    command.arg("--newmode").arg(&generated_name);
 
     for value in &values {
       command.arg(value);
@@ -172,13 +127,7 @@ fn ensure_mode(
     let status = command.status()?;
 
     if !status.success() {
-      return Err(
-        format!(
-          "Failed to create mode {}",
-          generated_name
-        )
-        .into(),
-      );
+      return Err(format!("Failed to create mode {}", generated_name).into());
     }
   }
 
@@ -186,17 +135,11 @@ fn ensure_mode(
   //
   // It may already be attached, so only do this if
   // it isn't already present.
-  let xrandr = Command::new("xrandr")
-    .arg("--query")
-    .output()?;
+  let xrandr = Command::new("xrandr").arg("--query").output()?;
 
   let text = String::from_utf8(xrandr.stdout)?;
 
-  if find_output_mode(
-    &text,
-    output,
-    &requested,
-  ).is_none() {
+  if find_output_mode(&text, output, &requested).is_none() {
     let status = Command::new("xrandr")
       .arg("--addmode")
       .arg(output)
@@ -204,46 +147,27 @@ fn ensure_mode(
       .status()?;
 
     if !status.success() {
-      return Err(
-        format!(
-          "Failed to add mode {} to {}",
-          generated_name,
-          output
-        )
-        .into(),
-      );
+      return Err(format!("Failed to add mode {} to {}", generated_name, output).into());
     }
   }
 
-  println!(
-    "Using mode: {}",
-    generated_name
-  );
+  println!("Using mode: {}", generated_name);
 
   Ok(generated_name)
 }
 
-fn find_output_mode(
-  xrandr_output: &str,
-  output_name: &str,
-  requested: &str,
-) -> Option<String> {
+fn find_output_mode(xrandr_output: &str, output_name: &str, requested: &str) -> Option<String> {
   let mut found_output = false;
 
   for line in xrandr_output.lines() {
     // Found our output.
-    if line.starts_with(output_name)
-      && line.contains(" connected")
-    {
+    if line.starts_with(output_name) && line.contains(" connected") {
       found_output = true;
       continue;
     }
 
     // Another output starts.
-    if found_output
-      && !line.starts_with(' ')
-      && !line.starts_with('\t')
-    {
+    if found_output && !line.starts_with(' ') && !line.starts_with('\t') {
       break;
     }
 
@@ -263,14 +187,8 @@ fn find_output_mode(
        *
        * Accept either.
        */
-      if part == requested
-        || part.starts_with(
-          &format!("{}_", requested)
-        )
-      {
-        return Some(
-          part.to_string()
-        );
+      if part == requested || part.starts_with(&format!("{}_", requested)) {
+        return Some(part.to_string());
       }
     }
   }
@@ -288,9 +206,7 @@ pub fn cleanup() -> Result<(), Box<dyn std::error::Error>> {
     .status()?;
 
   if !status.success() {
-    return Err(
-      "Failed to disable virtual display".into()
-    );
+    return Err("Failed to disable virtual display".into());
   }
 
   println!("Virtual display disabled");
@@ -298,19 +214,13 @@ pub fn cleanup() -> Result<(), Box<dyn std::error::Error>> {
   Ok(())
 }
 
-fn find_virtual_output(
-) -> Result<String, Box<dyn std::error::Error>> {
-  let output = Command::new("xrandr")
-    .arg("--query")
-    .output()?;
+fn find_virtual_output() -> Result<String, Box<dyn std::error::Error>> {
+  let output = Command::new("xrandr").arg("--query").output()?;
 
-  let text =
-    String::from_utf8(output.stdout)?;
+  let text = String::from_utf8(output.stdout)?;
 
   for line in text.lines() {
-    if line.starts_with("Virtual-")
-      && line.contains(" connected")
-    {
+    if line.starts_with("Virtual-") && line.contains(" connected") {
       let name = line
         .split_whitespace()
         .next()
@@ -320,19 +230,13 @@ fn find_virtual_output(
     }
   }
 
-  Err(
-    "Could not find virtual output".into()
-  )
+  Err("Could not find virtual output".into())
 }
 
-fn find_primary_output(
-) -> Result<String, Box<dyn std::error::Error>> {
-  let output = Command::new("xrandr")
-    .arg("--query")
-    .output()?;
+fn find_primary_output() -> Result<String, Box<dyn std::error::Error>> {
+  let output = Command::new("xrandr").arg("--query").output()?;
 
-  let text =
-    String::from_utf8(output.stdout)?;
+  let text = String::from_utf8(output.stdout)?;
 
   /*
    * Prefer an explicitly primary display.
@@ -369,25 +273,16 @@ fn find_primary_output(
     }
   }
 
-  Err(
-    "Could not find physical display".into()
-  )
+  Err("Could not find physical display".into())
 }
 
-fn get_geometry(
-  output_name: &str,
-) -> Result<(i16, i16), Box<dyn std::error::Error>> {
-  let output = Command::new("xrandr")
-    .arg("--query")
-    .output()?;
+fn get_geometry(output_name: &str) -> Result<(i16, i16), Box<dyn std::error::Error>> {
+  let output = Command::new("xrandr").arg("--query").output()?;
 
-  let text =
-    String::from_utf8(output.stdout)?;
+  let text = String::from_utf8(output.stdout)?;
 
   for line in text.lines() {
-    if !line.starts_with(output_name)
-      || !line.contains(" connected")
-    {
+    if !line.starts_with(output_name) || !line.contains(" connected") {
       continue;
     }
 
@@ -400,74 +295,47 @@ fn get_geometry(
        * 1024x768+0-768
        */
 
-      let Some(x_pos) = part.find('x')
-      else {
+      let Some(x_pos) = part.find('x') else {
         continue;
       };
 
-      let geometry =
-        &part[x_pos + 1..];
+      let geometry = &part[x_pos + 1..];
 
-      let Some(first_sign) =
-        geometry.find(['+', '-'])
-      else {
+      let Some(first_sign) = geometry.find(['+', '-']) else {
         continue;
       };
 
-      let coords =
-        &geometry[first_sign..];
+      let coords = &geometry[first_sign..];
 
-      let Some(second_sign) =
-        coords[1..].find(['+', '-'])
-      else {
+      let Some(second_sign) = coords[1..].find(['+', '-']) else {
         continue;
       };
 
-      let second_sign =
-        second_sign + 1;
+      let second_sign = second_sign + 1;
 
-      let x_str =
-        &coords[..second_sign];
+      let x_str = &coords[..second_sign];
 
-      let y_str =
-        &coords[second_sign..];
+      let y_str = &coords[second_sign..];
 
-      if let (Ok(x), Ok(y)) = (
-        x_str.parse::<i16>(),
-        y_str.parse::<i16>(),
-      ) {
+      if let (Ok(x), Ok(y)) = (x_str.parse::<i16>(), y_str.parse::<i16>()) {
         return Ok((x, y));
       }
     }
   }
 
-  Err(
-    format!(
-      "Could not find geometry for {}",
-      output_name
-    )
-    .into(),
-  )
+  Err(format!("Could not find geometry for {}", output_name).into())
 }
 
-pub fn move_workspace(
-  workspace: u32,
-  output: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn move_workspace(workspace: u32, output: &str) -> Result<(), Box<dyn std::error::Error>> {
   let command = format!(
     "workspace {}; move workspace to output {}",
-    workspace,
-    output
+    workspace, output
   );
 
-  let status = Command::new("i3-msg")
-    .arg(&command)
-    .status()?;
+  let status = Command::new("i3-msg").arg(&command).status()?;
 
   if !status.success() {
-    return Err(
-      "Failed to move workspace".into()
-    );
+    return Err("Failed to move workspace".into());
   }
 
   Ok(())
