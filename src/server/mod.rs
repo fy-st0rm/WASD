@@ -1,6 +1,6 @@
 pub mod ws;
 
-use axum::{Router, response::Html, routing::get};
+use axum::{Router, response::Html, routing::get, serve::ListenerExt};
 use std::net::UdpSocket;
 
 use crate::config::DisplayConfig;
@@ -41,11 +41,17 @@ pub async fn run(
 
   let ip = local_ip()?;
 
-  println!("MASD server: http://{}:{}", ip, port);
+  println!("WASD server: http://{}:{}", ip, port);
 
   let listener = tokio::net::TcpListener::bind(addr).await?;
 
-  axum::serve(listener, app).await?;
+  axum::serve(
+    listener.tap_io(|stream| {
+      let _ = stream.set_nodelay(true);
+    }),
+    app,
+  )
+  .await?;
 
   Ok(())
 }

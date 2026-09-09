@@ -30,6 +30,8 @@ pub struct X11Capture {
   frame: Vec<u8>,
 
   cursor: Option<Cursor>,
+  // XFixes serial — increments on every cursor shape change.
+  cursor_serial: u32,
 }
 
 struct Cursor {
@@ -121,29 +123,36 @@ impl X11Capture {
       frame: vec![0u8; size],
 
       cursor: None,
+      cursor_serial: u32::MAX, // force first fetch
     })
   }
 
   fn update_cursor(&mut self) -> Result<(), Box<dyn std::error::Error>> {
     let cursor = self.conn.xfixes_get_cursor_image()?.reply()?;
 
-    self.cursor = Some(Cursor {
-      x: cursor.x,
-      y: cursor.y,
-
-      width: cursor.width,
-      height: cursor.height,
-
-      xhot: cursor.xhot,
-      yhot: cursor.yhot,
-
-      pixels: cursor.cursor_image,
-    });
+    // Skip expensive pixel copy when the cursor shape hasn't changed
+    // (only position/hotspot may differ).
+    if cursor.cursor_serial != self.cursor_serial {
+      self.cursor_serial = cursor.cursor_serial;
+      self.cursor = Some(Cursor {
+        x: cursor.x,
+        y: cursor.y,
+        width: cursor.width,
+        height: cursor.height,
+        xhot: cursor.xhot,
+        yhot: cursor.yhot,
+        pixels: cursor.cursor_image,
+      });
+    } else if let Some(ref mut c) = self.cursor {
+      // Shape unchanged — only update position.
+      c.x = cursor.x;
+      c.y = cursor.y;
+    }
 
     Ok(())
   }
 
-  fn draw_cursor(&self, frame: &mut [u8]) {
+  fn draw_cursor_inplace(&mut self) {
     let cursor = match &self.cursor {
       Some(cursor) => cursor,
       None => return,
@@ -152,65 +161,51 @@ impl X11Capture {
     // Convert global X11 cursor coordinates into
     // coordinates relative to our capture rectangle.
     let cursor_x = cursor.x as i32 - self.x as i32 - cursor.xhot as i32;
-
     let cursor_y = cursor.y as i32 - self.y as i32 - cursor.yhot as i32;
 
-    for cy in 0..cursor.height as i32 {
-      for cx in 0..cursor.width as i32 {
-        let dst_x = cursor_x + cx;
-        let dst_y = cursor_y + cy;
+    let cap_w = self.width as i32;
+    let cap_h = self.height as i32;
+    let cur_w = cursor.width as i32;
 
-        // Cursor is outside the capture region.
-        if dst_x < 0 || dst_y < 0 || dst_x >= self.width as i32 || dst_y >= self.height as i32 {
+    for cy in 0..cursor.height as i32 {
+      let dst_y = cursor_y + cy;
+      if dst_y < 0 || dst_y >= cap_h {
+        continue;
+      }
+
+      for cx in 0..cur_w {
+        let dst_x = cursor_x + cx;
+        if dst_x < 0 || dst_x >= cap_w {
           continue;
         }
 
-        let src_index = (cy * cursor.width as i32 + cx) as usize;
-
+        let src_index = (cy * cur_w + cx) as usize;
         let pixel = cursor.pixels[src_index];
 
-        // XFixes cursor format:
-        //
-        // 0xAARRGGBB
-        //
         let a = ((pixel >> 24) & 0xff) as u32;
-
-        // Completely transparent.
         if a == 0 {
           continue;
         }
 
         let r = ((pixel >> 16) & 0xff) as u32;
-
         let g = ((pixel >> 8) & 0xff) as u32;
-
         let b = (pixel & 0xff) as u32;
 
-        let dst_index = ((dst_y * self.width as i32 + dst_x) * 4) as usize;
+        let dst_index = ((dst_y * cap_w + dst_x) * 4) as usize;
 
         // Our framebuffer is BGRX.
         if a == 255 {
-          frame[dst_index] = b as u8;
-          frame[dst_index + 1] = g as u8;
-          frame[dst_index + 2] = r as u8;
-
-          // X byte can stay unchanged.
+          self.frame[dst_index] = b as u8;
+          self.frame[dst_index + 1] = g as u8;
+          self.frame[dst_index + 2] = r as u8;
         } else {
-          // Alpha blend cursor over framebuffer.
-
           let inv_a = 255 - a;
-
-          let old_b = frame[dst_index] as u32;
-
-          let old_g = frame[dst_index + 1] as u32;
-
-          let old_r = frame[dst_index + 2] as u32;
-
-          frame[dst_index] = ((b * a + old_b * inv_a) / 255) as u8;
-
-          frame[dst_index + 1] = ((g * a + old_g * inv_a) / 255) as u8;
-
-          frame[dst_index + 2] = ((r * a + old_r * inv_a) / 255) as u8;
+          let old_b = self.frame[dst_index] as u32;
+          let old_g = self.frame[dst_index + 1] as u32;
+          let old_r = self.frame[dst_index + 2] as u32;
+          self.frame[dst_index] = ((b * a + old_b * inv_a) / 255) as u8;
+          self.frame[dst_index + 1] = ((g * a + old_g * inv_a) / 255) as u8;
+          self.frame[dst_index + 2] = ((r * a + old_r * inv_a) / 255) as u8;
         }
       }
     }
@@ -232,24 +227,15 @@ impl X11Capture {
       )?
       .reply()?;
 
-    // Raw X11 framebuffer.
+    // Raw X11 framebuffer lives in shared memory — copy into our writable buffer.
     let pixels = unsafe { std::slice::from_raw_parts(self.shmaddr as *const u8, self.size) };
-
-    // Copy X11 framebuffer into our writable BGRX buffer.
     self.frame.copy_from_slice(pixels);
 
-    // Get current cursor image and position.
+    // Update cursor (skips pixel re-fetch when shape serial is unchanged).
     self.update_cursor()?;
 
     // Draw cursor onto BGRX framebuffer.
-    //
-    // The result is still BGRX, so TurboJPEG
-    // can consume it directly.
-    let mut frame = std::mem::take(&mut self.frame);
-
-    self.draw_cursor(&mut frame);
-
-    self.frame = frame;
+    self.draw_cursor_inplace();
 
     Ok(&self.frame)
   }
