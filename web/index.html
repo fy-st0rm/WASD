@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>MASD</title>
+    <title>WASD</title>
 
     <style>
         html, body {
@@ -93,14 +93,15 @@
     Fullscreen
 </button>
 
-<img id="screen">
+<canvas id="screen"></canvas>
 
 <script>
     const noSleep = new NoSleep();
 
     const ROTATION = __ROTATION__;
 
-    const image = document.getElementById("screen");
+    const canvas = document.getElementById("screen");
+    const ctx = canvas.getContext("2d", { alpha: false, desynchronized: true });
     const stats = document.getElementById("stats");
     const fullscreenButton = document.getElementById("fullscreen");
 
@@ -130,70 +131,113 @@
     document.addEventListener("visibilitychange", () => {
         if (document.visibilityState === "visible") {
             noSleep.enable();
+            requestNextFrame();
+        } else {
+            clearTimeout(ackTimeout);
         }
     });
 
     /*
-     * Latest-frame-only display
+     * Low-latency flow-controlled display
      */
     const socket =
         new WebSocket("ws://" + location.host + "/ws");
 
     socket.binaryType = "arraybuffer";
 
-    let latestFrame = null;
-    let displaying = false;
+    let ackTimeout = null;
+
+    // Ring buffer: keep only the latest 2 frames to avoid head-of-line blocking.
+    const frameQueue = [];
+    const MAX_QUEUE = 2;
 
     let frames = 0;
     let lastFpsTime = performance.now();
+    let rafScheduled = false;
+
+    function requestNextFrame() {
+        if (socket.readyState === WebSocket.OPEN) {
+            socket.send("ack");
+
+            // Safety watchdog: recover if a frame or ACK was dropped
+            clearTimeout(ackTimeout);
+            ackTimeout = setTimeout(() => {
+                if (socket.readyState === WebSocket.OPEN) {
+                    requestNextFrame();
+                }
+            }, 1000);
+        }
+    }
+
+    function scheduleRender() {
+        if (!rafScheduled) {
+            rafScheduled = true;
+            requestAnimationFrame(renderFrame);
+        }
+    }
+
+    function renderFrame() {
+        rafScheduled = false;
+        if (frameQueue.length === 0) return;
+
+        // Drop stale frames; only render the newest.
+        const bitmap = frameQueue[frameQueue.length - 1];
+        // Close any skipped frames.
+        for (let i = 0; i < frameQueue.length - 1; i++) {
+            frameQueue[i].close();
+        }
+        frameQueue.length = 0;
+
+        if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+            canvas.width = bitmap.width;
+            canvas.height = bitmap.height;
+        }
+
+        ctx.drawImage(bitmap, 0, 0);
+        bitmap.close();
+        frames++;
+
+        requestNextFrame();
+    }
 
     socket.onopen = () => {
         console.log("Connected");
+        requestNextFrame();
     };
 
-    socket.onmessage = (event) => {
-        latestFrame = event.data;
+    const useImageDecoder = typeof ImageDecoder !== "undefined";
 
-        if (!displaying) {
-            displayNext();
+    socket.onmessage = async (event) => {
+        clearTimeout(ackTimeout);
+
+        try {
+            let bitmap;
+            if (useImageDecoder) {
+                // ImageDecoder is faster: no Blob GC overhead, decoded off main thread.
+                const decoder = new ImageDecoder({
+                    type: "image/jpeg",
+                    data: event.data,
+                });
+                const { image } = await decoder.decode();
+                bitmap = image;
+                decoder.close();
+            } else {
+                bitmap = await createImageBitmap(
+                    new Blob([event.data], { type: "image/jpeg" })
+                );
+            }
+
+            // Evict oldest frame if queue is full.
+            if (frameQueue.length >= MAX_QUEUE) {
+                frameQueue.shift().close();
+            }
+            frameQueue.push(bitmap);
+            scheduleRender();
+        } catch (error) {
+            console.error("Decode error:", error);
+            requestNextFrame();
         }
     };
-
-    function displayNext() {
-        if (latestFrame === null) {
-            displaying = false;
-            return;
-        }
-
-        displaying = true;
-
-        const frame = latestFrame;
-        latestFrame = null;
-
-        const blob =
-            new Blob(
-                [frame],
-                { type: "image/jpeg" }
-            );
-
-        const url =
-            URL.createObjectURL(blob);
-
-        image.onload = () => {
-            URL.revokeObjectURL(url);
-
-            frames++;
-
-            displayNext();
-        };
-
-        image.onerror = () => {
-            URL.revokeObjectURL(url);
-            displaying = false;
-        };
-
-        image.src = url;
-    }
 
     /*
      * FPS counter
@@ -216,10 +260,12 @@
 
     socket.onclose = () => {
         console.log("Disconnected");
+        clearTimeout(ackTimeout);
     };
 
     socket.onerror = (error) => {
         console.error("WebSocket error:", error);
+        clearTimeout(ackTimeout);
     };
 </script>
 
