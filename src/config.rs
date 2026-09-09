@@ -32,12 +32,33 @@ pub enum Direction {
 
 impl Config {
   pub fn load() -> Result<Self, Box<dyn std::error::Error>> {
-    let path = dirs::config_dir()
+    let config_dir = dirs::config_dir()
       .ok_or("Could not find config directory")?
-      .join("wasd")
-      .join("wasd.toml");
+      .join("wasd");
 
-    let text = fs::read_to_string(&path)?;
+    let config_path = config_dir.join("wasd.toml");
+
+    // Create default config if it doesn't exist
+    if !config_path.exists() {
+      fs::create_dir_all(&config_dir)?;
+
+      let default_config = r#"[display]
+width = 1024
+height = 768
+direction = "right"
+rotation = 90
+workspace = 10
+
+[server]
+port = 8080
+"#;
+
+      fs::write(&config_path, default_config)?;
+
+      println!("Created default config at {}", config_path.display());
+    }
+
+    let text = fs::read_to_string(&config_path)?;
     let config: Config = toml::from_str(&text)?;
 
     if !matches!(config.display.rotation, 0 | 90 | 180 | 270) {
