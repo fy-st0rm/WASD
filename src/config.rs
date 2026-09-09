@@ -14,6 +14,7 @@ pub struct DisplayConfig {
   pub direction: Direction,
   pub rotation: i32,
   pub workspace: u32,
+  pub fps: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -48,6 +49,7 @@ height = 768
 direction = "right"
 rotation = 90
 workspace = 10
+fps = 30
 
 [server]
 port = 8080

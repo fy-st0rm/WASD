@@ -40,7 +40,7 @@ async fn handle_socket(
 
         let frame_time =
             std::time::Duration::from_secs_f64(
-                1.0 / 60.0
+                1.0 / display.fps as f64
             );
 
         loop {
@@ -67,8 +67,8 @@ async fn handle_socket(
 
             let jpeg = match compress(
                 image,
-                80,
-                Subsamp::Sub2x2,
+                100,
+                Subsamp::Sub2x1,
             ) {
                 Ok(jpeg) => jpeg,
                 Err(e) => {

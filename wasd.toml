@@ -11,5 +11,7 @@ rotation = 90
 # I3 Workspace that will be moved to virtual monitor
 workspace = 10
 
+fps = 30
+
 [server]
 port = 8080
